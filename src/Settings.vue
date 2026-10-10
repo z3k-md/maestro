@@ -1,5 +1,5 @@
 <template>
-  <div class="flex flex-col gap-4 p-4 bg-base-300 h-full w-full">
+  <div class="flex flex-col gap-4 p-4 bg-base-300 min-h-screen w-full">
     <!-- Toast container -->
     <div class="toast toast-top toast-center" v-if="toast">
       <div :class="`alert ${toast.success ? 'alert-success' : 'alert-error'}`">
