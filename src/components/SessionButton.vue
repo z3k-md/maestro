@@ -26,7 +26,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  hoverStyle: "bg-base-300"
+  hoverStyle: "bg-base-300",
 });
 
 const handleButtonClick = async () => {

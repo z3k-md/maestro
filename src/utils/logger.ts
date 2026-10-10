@@ -1,23 +1,29 @@
 import { invoke } from "@tauri-apps/api/core";
 
+type Level = "debug" | "info" | "warn" | "error";
+
+function send(level: Level, message: string) {
+  invoke("log", { message, level }).catch((error) => console.error("Failed to forward log", error));
+}
+
 export class Logger {
   public info(message: string) {
-    invoke("log", { message: message, level: "info" });
+    send("info", message);
     console.log(message);
   }
 
   public debug(message: string) {
-    invoke("log", { message: message, level: "debug" });
+    send("debug", message);
     console.debug(message);
   }
 
   public warn(message: string) {
-    invoke("log", { message: message, level: "warn" });
+    send("warn", message);
     console.warn(message);
   }
 
-  public error(message: string, error?: any) {
-    invoke("log", { message: message, level: "error" });
+  public error(message: string, error?: unknown) {
+    send("error", error === undefined ? message : `${message}: ${String(error)}`);
     console.error(message, error);
   }
 }

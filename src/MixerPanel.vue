@@ -2,12 +2,13 @@
   <div id="container" class="flex flex-col h-screen w-screen bg-base-300 justify-center m-0 p-0">
     <h1 class="text-md font-bold pb-2 px-4 m-0">Maestro</h1>
     <div class="flex flex-col gap-2">
-      <VolumeControl 
-        v-for="session in sessions" 
-        :key="session.name" 
-        :sessionName="session.name" 
-        :volume="session.volume" 
-        :icon="session.icon" 
+      <VolumeControl
+        v-for="session in sessions"
+        :key="session.name"
+        :sessionName="session.name"
+        :volume="session.volume"
+        :mute="session.mute"
+        :icon="session.icon"
       />
     </div>
   </div>
@@ -21,15 +22,9 @@ import type { AudioSession } from "./types/audioSession";
 import { Command, invokeCommand } from "./utils/commands";
 import { AppEvent, listenToEvent } from "./utils/events";
 import { logger } from "./utils/logger";
+import { applyTheme } from "./utils/ui";
 
 const sessions = ref<AudioSession[]>([]);
-
-const fetchConfig = async () => {
-  const config = await invokeCommand(Command.GetConfig);
-  logger.debug(`Loaded config: ${JSON.stringify(config)}`);
-  let theme = config!.system.theme;
-  document.documentElement.setAttribute("data-theme", theme);
-};
 
 const fetchSessions = async () => {
   const sessionsData = await invokeCommand(Command.GetAllSessions);
@@ -45,52 +40,52 @@ const fetchSessions = async () => {
 
 const setWindowSizeAndPosition = async () => {
   const monitor = await currentMonitor();
+  if (!monitor) {
+    logger.error("No monitor found");
+    return;
+  }
+
   const appWindow = getCurrentWindow();
+  const { scaleFactor } = monitor;
 
-  let screenWidth = monitor!.size.width;
-  let screenHeight = monitor!.size.height;
+  const windowWidth = Math.round(300 * scaleFactor);
 
-  let scaleFactor = monitor!.scaleFactor;
-  let windowWidth = Math.round(300 * scaleFactor);
-
-  // Calculate height based on number of sessions
+  // Height grows with the number of sessions
   const baseHeight = 75;
   const padding = 40;
-  let windowHeight = Math.round((sessions.value.length * baseHeight + padding) * scaleFactor);
+  const windowHeight = Math.round((sessions.value.length * baseHeight + padding) * scaleFactor);
 
-  logger.debug(`Setting window size: ${windowWidth} ${windowHeight}`);
   await appWindow.setSize(new PhysicalSize(windowWidth, windowHeight));
 
-  let x = screenWidth - (windowWidth + 20);
-  let y = screenHeight - (windowHeight + 80);
+  const x = monitor.position.x + monitor.size.width - (windowWidth + 20);
+  const y = monitor.position.y + monitor.size.height - (windowHeight + 80);
 
-  logger.debug(`Setting window position: ${x} ${y}`);
   await appWindow.setPosition(new PhysicalPosition(x, y));
 };
 
-// Watch for sessions changes and resize window accordingly
-watch(sessions, async () => {
-  logger.debug(`Sessions changed`);
-  await setWindowSizeAndPosition();
-}, { deep: true });
+watch(
+  () => sessions.value.length,
+  async () => {
+    await setWindowSizeAndPosition();
+  },
+);
 
 onMounted(async () => {
   await fetchSessions();
-  await fetchConfig();
+  await setWindowSizeAndPosition();
+
+  const config = await invokeCommand(Command.GetConfig);
+  applyTheme(config.system.theme);
 
   listenToEvent(AppEvent.MixerVisibilityChange, async (visible: boolean) => {
-    const appWindow = getCurrentWindow();
     if (visible) {
       await fetchSessions();
-      appWindow.show();
-    } else {
-      appWindow.hide();
     }
   });
 
-  listenToEvent(AppEvent.ThemeChange, (theme: string) => {
+  listenToEvent(AppEvent.ThemeChange, (theme) => {
     logger.info(`Theme changed to ${theme}`);
-    document.documentElement.setAttribute("data-theme", theme);
+    applyTheme(theme);
   });
 });
 </script>
