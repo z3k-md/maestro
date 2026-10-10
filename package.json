@@ -5,28 +5,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "format": "prettier --write src",
     "tauri": "tauri",
     "start": "tauri dev",
     "version": "node scripts/update-version.js"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.8.0",
-    "@tauri-apps/plugin-autostart": "^2.5.0",
-    "@tauri-apps/plugin-shell": "^2.3.1",
-    "vue": "^3.5.22",
-    "tailwind-merge": "^3.3.1",
-    "tailwindcss-animate": "^1.0.7"
+    "@tauri-apps/api": "^2.12.2",
+    "vue": "^3.5.43"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.14",
-    "@tauri-apps/cli": "^2.8.4",
-    "@types/node": "^24.6.2",
-    "@vitejs/plugin-vue": "^6.0.1",
-    "daisyui": "^5.1.27",
-    "prettier": "3.6.2",
-    "tailwindcss": "^4.1.14",
-    "typescript": "^5.9.3",
-    "vite": "^7.1.9"
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "daisyui": "^5.7.47",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.4",
+    "vue-tsc": "^3.3.12"
   }
 }
