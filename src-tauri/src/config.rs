@@ -1,169 +1,189 @@
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use serde_json::to_string_pretty;
 use std::fs;
-use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use tauri::AppHandle;
-use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
 use crate::api::events::emit_config_change_event;
 
+/// Default configuration, written to the user's config directory on first run.
+const DEFAULT_CONFIG: &str = include_str!("../config.yaml");
+const CONFIG_FILE_NAME: &str = "config.yaml";
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Session name that matches every audio session not explicitly listed in the config.
+pub const OTHER_SESSION: &str = "other";
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct KeybindConfig {
     pub key: String,
     pub action: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MixerConfig {
     pub enabled: bool,
     pub hotkey: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SystemConfig {
     pub autostart: bool,
     pub show_console: bool,
     pub theme: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SessionConfig {
     pub name: String,
     pub keybinds: Option<Vec<KeybindConfig>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Config {
     pub sessions: Vec<SessionConfig>,
     pub mixer: MixerConfig,
     pub system: SystemConfig,
 }
 
-static CONFIG: Lazy<Arc<Mutex<Config>>> = Lazy::new(|| Arc::new(Mutex::new(load_config())));
+impl Default for Config {
+    fn default() -> Self {
+        serde_yaml_ng::from_str(DEFAULT_CONFIG).expect("bundled default config is valid")
+    }
+}
 
-// Return all defined sessions except for 'other'
-pub fn get_defined_session_names() -> Vec<String> {
-    let config = get_config();
-    let session_names: Vec<String> = config
-        .sessions
-        .iter()
-        .filter(|session| session.name.to_lowercase() != "other")
-        .map(|session| session.name.clone())
-        .collect();
-    return session_names.iter().map(|name| name.to_lowercase()).collect();
+impl Config {
+    /// Lowercased names of every configured session except the `other` catch-all.
+    pub fn defined_session_names(&self) -> Vec<String> {
+        self.sessions
+            .iter()
+            .map(|session| session.name.to_lowercase())
+            .filter(|name| name != OTHER_SESSION)
+            .collect()
+    }
+}
+
+struct ConfigStore {
+    path: PathBuf,
+    config: Config,
+}
+
+static STORE: OnceLock<Mutex<ConfigStore>> = OnceLock::new();
+
+/// Loads the config from `config_dir`, creating it on first run. Must be called before any other function in this module.
+pub fn init(config_dir: &Path) {
+    let path = config_dir.join(CONFIG_FILE_NAME);
+
+    if !path.exists()
+        && let Err(e) = create_config_file(&path)
+    {
+        log::error!("Failed to create config file at {}: {}", path.display(), e);
+    }
+
+    let config = match load_config(&path) {
+        Ok(config) => config,
+        Err(e) => {
+            log::error!("Failed to load config from {}, using defaults: {}", path.display(), e);
+            Config::default()
+        }
+    };
+
+    log::info!("Loaded config from {}", path.display());
+
+    if STORE.set(Mutex::new(ConfigStore { path, config })).is_err() {
+        log::warn!("Config already initialized");
+    }
+}
+
+fn store() -> &'static Mutex<ConfigStore> {
+    STORE.get().expect("config::init must be called before using the config")
 }
 
 pub fn get_config() -> Config {
-    CONFIG.lock().unwrap().clone()
+    store().lock().unwrap().config.clone()
 }
 
-pub fn set_config(config: Config, app_handle: &AppHandle) {
-    let pretty_config = to_string_pretty(&config).unwrap();
-    log::info!("Saving config:\n{}", pretty_config);
-
-    save_config(&config).unwrap();
-
-    let reloaded_config = load_config();
-
-    let mut config_guard = CONFIG.lock().unwrap();
-    *config_guard = reloaded_config;
-
-    emit_config_change_event(&config, app_handle.clone());
-
-    log::info!("Config reload complete.");
+pub fn get_defined_session_names() -> Vec<String> {
+    get_config().defined_session_names()
 }
 
-fn save_config(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
-    let file_path = config_file_path()?;
-    let mut file_content = String::new();
-    if file_path.exists() {
-        fs::File::open(&file_path)?.read_to_string(&mut file_content)?;
+pub fn set_config(config: Config, app_handle: &AppHandle) -> Result<(), String> {
+    {
+        let mut store = store().lock().unwrap();
+        save_config(&store.path, &config).map_err(|e| format!("Failed to save config: {e}"))?;
+        store.config = config.clone();
+        log::info!("Saved config to {}", store.path.display());
     }
 
-    let mut yaml_docs = YamlLoader::load_from_str(&file_content).unwrap_or_else(|_| vec![Yaml::Hash(yaml_rust::yaml::Hash::new())]);
-    let yaml_config = &mut yaml_docs[0];
-
-    // Update the YAML with new values from the config
-    update_yaml_from_config(yaml_config, config);
-
-    let mut out_str = String::new();
-
-    let mut emitter = YamlEmitter::new(&mut out_str);
-    emitter.dump(yaml_config)?;
-
-    fs::File::create(&file_path)?.write_all(out_str.as_bytes())?;
+    emit_config_change_event(&config, app_handle);
     Ok(())
 }
 
-fn load_config() -> Config {
-    let file_path = config_file_path().unwrap();
-    let mut file_content = String::new();
-    fs::File::open(&file_path).unwrap().read_to_string(&mut file_content).unwrap();
-
-    let yaml_docs = YamlLoader::load_from_str(&file_content).unwrap();
-    let yaml_config = &yaml_docs[0];
-
-    let config: Config = serde_yaml::from_value(yaml_to_value(yaml_config)).unwrap();
-    return config;
-}
-
-fn config_file_path() -> Result<PathBuf, std::io::Error> {
-    Ok(std::env::current_dir()?.join("config.yaml"))
-}
-
-fn yaml_to_value(yaml: &Yaml) -> serde_yaml::Value {
-    match yaml {
-        Yaml::Real(s) => serde_yaml::Value::Number(s.parse().unwrap()),
-        Yaml::Integer(i) => serde_yaml::Value::Number((*i).into()),
-        Yaml::String(s) => serde_yaml::Value::String(s.clone()),
-        Yaml::Boolean(b) => serde_yaml::Value::Bool(*b),
-        Yaml::Array(a) => serde_yaml::Value::Sequence(a.iter().map(yaml_to_value).collect()),
-        Yaml::Hash(h) => serde_yaml::Value::Mapping(h.iter().map(|(k, v)| (yaml_to_value(k), yaml_to_value(v))).collect()),
-        Yaml::Null => serde_yaml::Value::Null,
-        _ => unreachable!(),
+/// Seeds a new config file, carrying over the config that older versions kept next to the executable.
+fn create_config_file(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
     }
-}
 
-fn update_yaml_from_config(yaml: &mut Yaml, config: &Config) {
-    if let Yaml::Hash(ref mut hash) = *yaml {
-        update_yaml_field(hash, "sessions", &config.sessions);
-        update_yaml_field(hash, "mixer", &config.mixer);
-        update_yaml_field(hash, "system", &config.system);
+    let legacy_path = std::env::current_exe()?.with_file_name(CONFIG_FILE_NAME);
+    if legacy_path.exists() && load_config(&legacy_path).is_ok() {
+        log::info!("Migrating config from {}", legacy_path.display());
+        fs::copy(&legacy_path, path)?;
+    } else {
+        fs::write(path, DEFAULT_CONFIG)?;
     }
+
+    Ok(())
 }
 
-fn update_yaml_field<T: Serialize>(hash: &mut yaml_rust::yaml::Hash, key: &str, value: &T) {
-    let yaml_value = serde_yaml::to_value(value).unwrap();
-    let yaml_key = Yaml::String(key.to_string());
-    hash.insert(yaml_key, value_to_yaml(&yaml_value));
+fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {
+    let contents = fs::read_to_string(path)?;
+    Ok(serde_yaml_ng::from_str(&contents)?)
 }
 
-fn value_to_yaml(value: &serde_yaml::Value) -> Yaml {
-    match value {
-        serde_yaml::Value::Null => Yaml::Null,
-        serde_yaml::Value::Bool(b) => Yaml::Boolean(*b),
-        serde_yaml::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Yaml::Integer(i)
-            } else if let Some(f) = n.as_f64() {
-                Yaml::Real(f.to_string())
-            } else {
-                Yaml::Null
-            }
-        }
-        serde_yaml::Value::String(s) => Yaml::String(s.clone()),
-        serde_yaml::Value::Sequence(seq) => Yaml::Array(seq.iter().map(value_to_yaml).collect()),
-        serde_yaml::Value::Mapping(m) => {
-            let mut hash = yaml_rust::yaml::Hash::new();
-            for (k, v) in m {
-                hash.insert(value_to_yaml(k), value_to_yaml(v));
-            }
-            Yaml::Hash(hash)
-        }
-        serde_yaml::Value::Tagged(tagged) => value_to_yaml(&tagged.value),
+fn save_config(path: &Path, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    fs::write(path, serde_yaml_ng::to_string(config)?)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_parses() {
+        let config = Config::default();
+        assert!(config.mixer.enabled);
+        assert_eq!(config.mixer.hotkey.as_deref(), Some("Ctrl + Shift + M"));
+        assert_eq!(config.sessions.first().map(|s| s.name.as_str()), Some("master"));
+    }
+
+    #[test]
+    fn defined_session_names_excludes_other() {
+        let mut config = Config::default();
+        config.sessions.push(SessionConfig {
+            name: "Spotify".into(),
+            keybinds: None,
+        });
+
+        let names = config.defined_session_names();
+        assert!(names.contains(&"master".to_string()));
+        assert!(names.contains(&"spotify".to_string()));
+        assert!(!names.contains(&OTHER_SESSION.to_string()));
+    }
+
+    #[test]
+    fn config_round_trips_through_file() {
+        let dir = std::env::temp_dir().join(format!("maestro-config-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CONFIG_FILE_NAME);
+
+        let mut config = Config::default();
+        config.system.theme = Some("light".into());
+        config.mixer.hotkey = None;
+
+        save_config(&path, &config).unwrap();
+        assert_eq!(load_config(&path).unwrap(), config);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

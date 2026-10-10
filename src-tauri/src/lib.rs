@@ -1,14 +1,16 @@
+use tauri::Manager;
+
 use services::window_service;
 use tray::system_tray;
-use utils::{logger, macro_listener};
+use utils::{key_bindings, logger, system_manager};
 
 pub mod config;
 mod tray {
     pub mod system_tray;
 }
 mod utils {
+    pub mod key_bindings;
     pub mod logger;
-    pub mod macro_listener;
     pub mod system_manager;
 }
 mod api {
@@ -25,54 +27,45 @@ mod models {
 }
 
 pub fn run() {
-    logger::init();
-
-    log::info!("Maestro v{}", env!("CARGO_PKG_VERSION"));
-
     tauri::Builder::default()
+        // Must be registered first. A second launch would install duplicate key hooks and tray icons.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            log::info!("Maestro is already running, opening settings");
+            window_service::open_settings(app);
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             let handle = app.handle();
 
-            // Initialize autostart plugin
-            #[cfg(desktop)]
-            {
-                use tauri_plugin_autostart::MacosLauncher;
-                let _ = app.handle().plugin(tauri_plugin_autostart::init(
-                    MacosLauncher::LaunchAgent,
-                    Some(vec![]), // No additional arguments needed
-                ));
-            }
+            logger::init(&app.path().app_log_dir()?);
+            log::info!("Maestro v{}", env!("CARGO_PKG_VERSION"));
 
-            utils::system_manager::handle_debug_console(handle.clone());
+            config::init(&app.path().app_config_dir()?);
 
-            window_service::create_overlay(handle.clone());
-            window_service::create_mixer(handle.clone());
+            system_manager::handle_debug_console(handle.clone());
+            system_manager::handle_autostart(handle.clone());
 
-            system_tray::initialize_tray(handle.clone());
+            window_service::create_overlay(handle)?;
+            window_service::create_mixer(handle)?;
 
+            system_tray::initialize_tray(handle)?;
 
-            macro_listener::initialize_key_listeners(handle.clone());
+            key_bindings::initialize_key_listeners(handle.clone());
 
             Ok(())
         })
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
         .invoke_handler(tauri::generate_handler![
             api::commands::get_all_sessions,
             api::commands::get_session,
-            api::commands::get_session_volume,
             api::commands::set_session_volume,
             api::commands::toggle_session_mute,
             api::commands::log,
             api::commands::get_config,
             api::commands::set_config,
-            api::commands::enable_autostart,
-            api::commands::disable_autostart,
-            api::commands::is_autostart_enabled,
-            services::window_service::get_taskbar_height
+            window_service::get_taskbar_height
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

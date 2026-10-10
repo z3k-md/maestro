@@ -16,66 +16,32 @@ pub fn log(message: String, level: &str) {
 
 #[tauri::command]
 pub fn get_all_sessions() -> Vec<AudioSession> {
-    return volume_service::get_all_sessions();
+    volume_service::get_all_sessions()
 }
 
 #[tauri::command]
 pub fn get_session(session_name: &str) -> Option<AudioSession> {
-    return volume_service::get_sessions(session_name).into_iter().next();
+    volume_service::get_session(session_name)
 }
 
 #[tauri::command]
-pub fn get_session_volume(session_name: &str) -> i32 {
-    return volume_service::get_session_volume(session_name);
+pub fn set_session_volume(session_name: &str, volume: i32) -> Option<AudioSession> {
+    volume_service::set_session_volume(session_name, volume)
 }
 
 #[tauri::command]
-pub fn set_session_volume(session_name: &str, volume: i32) -> AudioSession {
-    return volume_service::set_session_volume(session_name, volume).expect("Failed to set volume.");
-}
-
-
-#[tauri::command]
-pub fn toggle_session_mute(app_handle: AppHandle, session_name: &str) -> bool {
-    let session = volume_service::toggle_session_mute(session_name);
-
-    events::emit_volume_change_event(&session, app_handle);
-
-    return session.mute;
+pub fn toggle_session_mute(app_handle: AppHandle, session_name: &str) -> Option<bool> {
+    let session = volume_service::toggle_session_mute(session_name)?;
+    events::emit_volume_change_event(&session, &app_handle);
+    Some(session.mute)
 }
 
 #[tauri::command]
 pub fn get_config() -> Config {
-    return config::get_config();
+    config::get_config()
 }
 
 #[tauri::command]
-pub fn set_config(config: Config, app_handle: AppHandle) {
-    config::set_config(config, &app_handle);
-}
-
-#[tauri::command]
-pub fn enable_autostart(app_handle: AppHandle) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    
-    let autostart_manager = app_handle.autolaunch();
-    autostart_manager.enable().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn disable_autostart(app_handle: AppHandle) -> Result<(), String> {
-    use tauri_plugin_autostart::ManagerExt;
-    
-    let autostart_manager = app_handle.autolaunch();
-    autostart_manager.disable().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn is_autostart_enabled(app_handle: AppHandle) -> Result<bool, String> {
-    use tauri_plugin_autostart::ManagerExt;
-    
-    let autostart_manager = app_handle.autolaunch();
-    autostart_manager.is_enabled().map_err(|e| e.to_string())
+pub fn set_config(config: Config, app_handle: AppHandle) -> Result<(), String> {
+    config::set_config(config, &app_handle)
 }

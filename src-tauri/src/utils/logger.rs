@@ -1,76 +1,78 @@
-use flexi_logger::{DeferredNow, Duplicate, FileSpec, Logger, WriteMode};
+use flexi_logger::{Cleanup, Criterion, DeferredNow, Duplicate, FileSpec, Logger, LoggerHandle, Naming, WriteMode};
 use log::Record;
-use std::{fs, io::Write, path::Path, process::Command};
+use std::{
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::OnceLock,
+};
 
-pub fn init() {
-    let format = |write: &mut dyn Write, now: &mut DeferredNow, record: &Record| {
-        let level = record.level();
-        let color_code = match level {
-            log::Level::Error => "\x1b[31m", // Red
-            log::Level::Warn => "\x1b[33m",  // Yellow
-            log::Level::Info => "\x1b[32m",  // Green
-            log::Level::Debug => "\x1b[34m", // Blue
-            log::Level::Trace => "\x1b[35m", // Magenta
-        };
+const LOG_FILES_TO_KEEP: usize = 3;
 
-        write!(
-            write,
-            "{}{} [{}] - {} - {}\x1b[0m\n",
-            color_code,
-            now.now().format("%Y-%m-%d %H:%M:%S"),
-            level,
-            record.target(),
-            record.args()
-        )
+static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
+static LOGGER: OnceLock<LoggerHandle> = OnceLock::new();
+
+fn file_format(write: &mut dyn Write, now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
+    write!(
+        write,
+        "{} [{}] - {} - {}",
+        now.now().format("%Y-%m-%d %H:%M:%S"),
+        record.level(),
+        record.target(),
+        record.args()
+    )
+}
+
+fn console_format(write: &mut dyn Write, now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
+    let color_code = match record.level() {
+        log::Level::Error => "\x1b[31m", // Red
+        log::Level::Warn => "\x1b[33m",  // Yellow
+        log::Level::Info => "\x1b[32m",  // Green
+        log::Level::Debug => "\x1b[34m", // Blue
+        log::Level::Trace => "\x1b[35m", // Magenta
     };
 
-    let log_file_spec = FileSpec::default().directory("logs").basename("output").suffix("txt");
-
-    Logger::try_with_str("info")
-        .unwrap()
-        .format(format)
-        .log_to_file(log_file_spec)
-        .write_mode(WriteMode::BufferAndFlush)
-        .duplicate_to_stdout(Duplicate::All)
-        .start()
-        .unwrap();
-
-    delete_old_log_files(3);
+    write!(write, "{}", color_code)?;
+    file_format(write, now, record)?;
+    write!(write, "\x1b[0m")
 }
 
-fn delete_old_log_files(keep: usize) {
-    let logs_dir = Path::new("logs");
-    if !logs_dir.exists() {
-        return;
-    }
+pub fn init(log_dir: &Path) {
+    let _ = LOG_DIR.set(log_dir.to_path_buf());
 
-    let mut log_files: Vec<_> = fs::read_dir(logs_dir)
-        .unwrap()
-        .filter_map(|entry| {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("txt") {
-                Some((entry.metadata().unwrap().modified().unwrap(), path))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let log_file_spec = FileSpec::default().directory(log_dir).basename("output").suffix("txt");
 
-    if log_files.len() <= keep {
-        return;
-    }
+    let result = Logger::try_with_str("info").and_then(|logger| {
+        logger
+            .log_to_file(log_file_spec)
+            .format_for_files(file_format)
+            .format_for_stdout(console_format)
+            .rotate(
+                Criterion::Size(5_000_000),
+                Naming::Timestamps,
+                Cleanup::KeepLogFiles(LOG_FILES_TO_KEEP),
+            )
+            .write_mode(WriteMode::BufferAndFlush)
+            .duplicate_to_stdout(Duplicate::All)
+            .start()
+    });
 
-    log_files.sort_by(|a, b| b.0.cmp(&a.0));
-
-    for (_, path) in log_files.into_iter().skip(keep) {
-        log::debug!("Deleting old log file: {}", path.display());
-        fs::remove_file(path).unwrap();
+    match result {
+        Ok(handle) => {
+            let _ = LOGGER.set(handle);
+        }
+        Err(e) => eprintln!("Failed to initialize logger: {e}"),
     }
 }
 
-pub fn open_log_file() {
-    Command::new("explorer").arg("logs").spawn().unwrap();
+pub fn open_log_dir() {
+    let Some(log_dir) = LOG_DIR.get() else {
+        return;
+    };
+
+    if let Err(e) = Command::new("explorer").arg(log_dir).spawn() {
+        log::error!("Failed to open log directory: {}", e);
+    }
 }
 
 pub fn log(message: String, level: &str) {
