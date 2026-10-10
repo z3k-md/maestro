@@ -47,15 +47,16 @@ const updateAppVersion = (type) => {
   // Update package.json
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
   packageJson.version = newVersion;
-  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
+  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + "\n");
 
   // Update Cargo.toml
   let cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
-  cargoToml = cargoToml.replace(/version\s*=\s*"\d+\.\d+\.\d+"/, `version = "${newVersion}"`);
+  cargoToml = cargoToml.replace(/^version\s*=\s*"\d+\.\d+\.\d+"/m, `version = "${newVersion}"`);
   fs.writeFileSync(cargoTomlPath, cargoToml);
 
+  // Only touch maestro's own entry; the first version in the lockfile belongs to an unrelated crate
   let cargoLock = fs.readFileSync(cargoLockPath, "utf8");
-  cargoLock = cargoLock.replace(/version\s*=\s*"\d+\.\d+\.\d+"/, `version = "${newVersion}"`);
+  cargoLock = cargoLock.replace(/(name = "maestro"\r?\nversion = )"\d+\.\d+\.\d+"/, `$1"${newVersion}"`);
   fs.writeFileSync(cargoLockPath, cargoLock);
 
   console.log(`✅ Version updated from ${currentVersion} to ${newVersion}`);

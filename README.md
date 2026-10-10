@@ -1,8 +1,8 @@
 # Maestro 🎵
 
-[![Build and Release](https://github.com/z3k-io/maestro/actions/workflows/release.yaml/badge.svg?branch=main)](https://github.com/z3k-io/maestro/actions/workflows/release.yaml)
+[![CI](https://github.com/z3k-md/maestro/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/z3k-md/maestro/actions/workflows/ci.yaml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/z3k-io/maestro)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](https://github.com/z3k-md/maestro)
 
 ---
 ### Ditch Window's uninspired audio controls. 
@@ -17,7 +17,7 @@ Maestro is a beautiful, modern audio mixer for Windows. Control individual appli
 
 ## 📦 Installation
 
-#### Download the [latest release](https://github.com/z3k-io/maestro/releases)
+#### Download the [latest release](https://github.com/z3k-md/maestro/releases)
 
 #### Requirements
 - Windows 10/11
@@ -28,21 +28,28 @@ Maestro is a beautiful, modern audio mixer for Windows. Control individual appli
 1. Download and install Maestro
 2. Runs at startup by default
 
+## ⚙️ Configuration
+
+Settings are available from the tray icon, or edit the config file directly:
+
+- Config: `%APPDATA%\com.maestro.app\config.yaml`
+- Logs: `%LOCALAPPDATA%\com.maestro.app\logs` (also reachable from the tray menu)
+
 ## 🛠️ Development
 
 ### Architecture
-Built with [Tauri](https://tauri.app), Windows API integration, audio session management, and hardware communication managed in [Rust](https://rust-lang.org/). UI uses [WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/), built with Vue.
+Built with [Tauri](https://tauri.app), Windows API integration, and audio session management handled in [Rust](https://rust-lang.org/). UI uses [WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/), built with Vue.
 
 ### Development Setup
 
 #### Requirements
-- **Rust** (1.8+)
+- **Rust** (latest stable)
 - **Bun** (or equivalent runtime)
 
 #### Getting Started
 ```bash
 # Clone the repository
-git clone https://github.com/z3k-io/maestro.git
+git clone https://github.com/z3k-md/maestro.git
 
 # Install dependencies
 bun install
@@ -52,7 +59,14 @@ bun run start
 
 # Build the executable
 bun run tauri build
+
+# Checks (also run in CI)
+bun run typecheck
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets && cargo test
 ```
+
+### Releasing
+`bun run version [patch|minor|major]` bumps the version from the latest tag, then offers to commit, tag, and push. Pushing a `v*` tag builds the installer and publishes a GitHub release.
 
 ## 🤝 Contributing
 
