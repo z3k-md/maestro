@@ -10,16 +10,16 @@ export default defineConfig(async () => ({
 
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 
   build: {
     rollupOptions: {
       input: {
-        overlay: path.resolve(__dirname, "index-overlay.html"),
-        mixer: path.resolve(__dirname, "index-mixer.html"),
-        settings: path.resolve(__dirname, "index-settings.html"),
+        overlay: path.resolve(import.meta.dirname, "index-overlay.html"),
+        mixer: path.resolve(import.meta.dirname, "index-mixer.html"),
+        settings: path.resolve(import.meta.dirname, "index-settings.html"),
       },
     },
   },

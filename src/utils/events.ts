@@ -10,7 +10,7 @@ export enum AppEvent {
 export interface EventPayloads {
   [AppEvent.VolumeChange]: AudioSession;
   [AppEvent.MixerVisibilityChange]: boolean;
-  [AppEvent.ThemeChange]: string;
+  [AppEvent.ThemeChange]: string | null;
 }
 
 export function listenToEvent<T extends AppEvent>(event: T, callback: (payload: EventPayloads[T]) => void): Promise<() => void> {

@@ -1,38 +1,34 @@
 <template>
-  <div class="flex flex-col gap-4 p-4 bg-base-300 h-full w-full">
+  <div class="flex flex-col gap-4 p-4 bg-base-300 min-h-screen w-full">
     <!-- Toast container -->
-    <div class="toast toast-top toast-center" v-if="showToast">
-      <div class="alert alert-success">
-        <span>{{ toastMessage }}</span>
+    <div class="toast toast-top toast-center" v-if="toast">
+      <div :class="`alert ${toast.success ? 'alert-success' : 'alert-error'}`">
+        <span>{{ toast.message }}</span>
       </div>
     </div>
     <!-- Header -->
     <div class="flex flex-row justify-between">
       <h1 class="text-3xl font-bold text-center p-2">Settings</h1>
       <div class="flex flex-row gap-2">
-        <button class="btn btn-outline btn-sm btn-info" @click="handleReset">
-          Reset
-        </button>
-        <button class="btn btn-outline btn-sm btn-success" @click="handleSave">
-          Save
-        </button>
+        <button class="btn btn-outline btn-sm btn-info" @click="handleReset">Reset</button>
+        <button class="btn btn-outline btn-sm btn-success" @click="handleSave">Save</button>
       </div>
     </div>
     <!-- Audio Mapping -->
     <div id="sessions" class="bg-base-100 p-4 rounded-lg">
       <h2 class="text-xl font-bold text-left">Audio Mapping</h2>
-      <div id="sessions" class="flex flex-row gap-2 justify-between">
+      <div class="flex flex-row gap-2 justify-between">
         <div v-for="(session, index) in config?.sessions" :key="index" class="flex flex-col gap-2">
           <label class="form-control w-full max-w-xs">
             <div class="label">
-              <span class="label-text">Encoder ({{ index }})</span>
+              <span class="label-text">Session {{ index + 1 }}</span>
             </div>
             <input
               type="text"
               placeholder="master"
               class="input input-sm input-bordered w-24 max-w-xs"
               :value="session.name"
-              @input="handleSessionChange(index, 'name', ($event.target as HTMLInputElement).value)"
+              @input="handleSessionNameChange(index, ($event.target as HTMLInputElement).value)"
             />
           </label>
         </div>
@@ -54,16 +50,16 @@
         </label>
       </div>
       <!-- Hotkey -->
-      <div class="flex flex-ro gap-2">
+      <div class="flex flex-row gap-2">
         <label class="label">
           <span class="label-text whitespace-nowrap">Hotkey</span>
         </label>
         <input
           type="text"
-          placeholder="Ctrl+Shift+M"
+          placeholder="Ctrl + Shift + M"
           class="input input-sm input-bordered w-full max-w-xs"
-          :value="config?.mixer.hotkey"
-          @input="handleMixerChange('hotkey', ($event.target as HTMLInputElement).value)"
+          :value="config?.mixer.hotkey ?? ''"
+          @input="handleMixerChange('hotkey', ($event.target as HTMLInputElement).value || null)"
         />
       </div>
     </div>
@@ -91,10 +87,7 @@
           />
         </label>
       </div>
-      <ThemePicker 
-        :theme="config?.system.theme || 'light'" 
-        :setTheme="(newTheme: string) => handleSystemChange('theme', newTheme)" 
-      />
+      <ThemePicker :theme="config?.system.theme || DEFAULT_THEME" :setTheme="(newTheme: string) => handleSystemChange('theme', newTheme)" />
     </div>
   </div>
 </template>
@@ -104,95 +97,91 @@ import { ref, onMounted } from "vue";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import ThemePicker from "./components/ThemePicker.vue";
-import type { Config } from "./types/config";
+import type { Config, MixerConfig, SystemConfig } from "./types/config";
 import { Command, invokeCommand } from "./utils/commands";
 import { logger } from "./utils/logger";
+import { applyTheme, DEFAULT_THEME } from "./utils/ui";
 
 const config = ref<Config>();
-const originalConfig = ref<Config>();
-const showToast = ref(false);
-const toastMessage = ref('');
+const savedConfig = ref<Config>();
+const toast = ref<{ message: string; success: boolean } | null>(null);
+
+const showToast = (message: string, success: boolean) => {
+  toast.value = { message, success };
+  setTimeout(() => {
+    toast.value = null;
+  }, 1500);
+};
 
 const loadConfig = async () => {
   const configData = await invokeCommand(Command.GetConfig);
-  logger.info(`Loaded config: ${JSON.stringify(configData)}`);
   config.value = configData;
-  originalConfig.value = configData;
-  let theme = configData!.system.theme;
-  document.documentElement.setAttribute("data-theme", theme);
+  savedConfig.value = configData;
+  applyTheme(configData.system.theme);
 };
 
 const setWindowSizeAndPosition = async () => {
   const monitor = await currentMonitor();
   const appWindow = getCurrentWindow();
 
-  const scaleFactor = monitor!.scaleFactor;
+  if (monitor) {
+    const { scaleFactor } = monitor;
 
-  const screenWidth = monitor!.size.width;
-  const screenHeight = monitor!.size.height;
+    const windowWidth = Math.round(600 * scaleFactor);
+    const windowHeight = Math.round(875 * scaleFactor);
+    const taskbarHeight = (await invokeCommand(Command.GetTaskbarHeight)) * scaleFactor + 23; // Magic number
+    const padding = 40 * scaleFactor;
 
-  const windowWidth = Math.round(600 * scaleFactor);
-  const windowHeight = Math.round(875 * scaleFactor);
-  let taskbarHeight = (await invokeCommand(Command.GetTaskbarHeight)) * scaleFactor;
+    await appWindow.setSize(new PhysicalSize(windowWidth, windowHeight));
 
-  logger.debug(`Setting window size: ${windowWidth} ${windowHeight}`);
-  await appWindow.setSize(new PhysicalSize(windowWidth, windowHeight));
+    const x = monitor.position.x + monitor.size.width - (windowWidth + padding);
+    const y = monitor.position.y + monitor.size.height - (windowHeight + taskbarHeight + padding);
 
-  let padding = 40 * scaleFactor;
-
-  logger.debug(`Screen width: ${screenWidth}`);
-  logger.debug(`Window width: ${windowWidth}`);
-  logger.debug(`Taskbar height: ${taskbarHeight}`);
-  logger.debug(`Padding: ${padding}`);
-
-  taskbarHeight += 23; // Magic number
-
-  const x = screenWidth - (windowWidth + padding);
-  const y = screenHeight - (windowHeight + taskbarHeight + padding);
-
-  logger.info(`Setting window position: ${x} ${y}`);
-
-  await appWindow.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+    await appWindow.setPosition(new PhysicalPosition(Math.round(x), Math.round(y)));
+  } else {
+    logger.error("No monitor found");
+  }
 
   await appWindow.show();
+  await appWindow.setFocus();
 };
 
-const handleSessionChange = (index: number, field: keyof Config["sessions"][0], value: string | number) => {
+const handleSessionNameChange = (index: number, name: string) => {
   if (!config.value) return;
-  const newSessions = [...config.value.sessions];
-  newSessions[index] = { ...newSessions[index], [field]: value };
-  config.value = { ...config.value, sessions: newSessions };
+  const sessions = [...config.value.sessions];
+  sessions[index] = { ...sessions[index], name };
+  config.value = { ...config.value, sessions };
 };
 
-const handleMixerChange = (field: keyof Config["mixer"], value: string | boolean) => {
+const handleMixerChange = <K extends keyof MixerConfig>(field: K, value: MixerConfig[K]) => {
   if (!config.value) return;
   config.value = { ...config.value, mixer: { ...config.value.mixer, [field]: value } };
 };
 
-const handleSystemChange = (field: keyof Config["system"], value: string | boolean) => {
-  logger.debug(`Setting ${field} to ${value}`);
+const handleSystemChange = <K extends keyof SystemConfig>(field: K, value: SystemConfig[K]) => {
   if (!config.value) return;
   config.value = { ...config.value, system: { ...config.value.system, [field]: value } };
 };
 
 const handleReset = () => {
-  config.value = originalConfig.value;
+  config.value = savedConfig.value;
 };
 
 const handleSave = async () => {
-  logger.debug(`Saving config: ${JSON.stringify(config.value)}`);
-  await invokeCommand(Command.SetConfig, { config: config.value! });
+  if (!config.value) return;
 
-  toastMessage.value = "Settings saved";
-  showToast.value = true;
-  
-  setTimeout(() => {
-    showToast.value = false;
-  }, 1000);
+  try {
+    await invokeCommand(Command.SetConfig, { config: config.value });
+    savedConfig.value = config.value;
+    showToast("Settings saved", true);
+  } catch (error) {
+    logger.error("Failed to save settings", error);
+    showToast("Failed to save settings", false);
+  }
 };
 
 onMounted(async () => {
-  await setWindowSizeAndPosition();
   await loadConfig();
+  await setWindowSizeAndPosition();
 });
 </script>

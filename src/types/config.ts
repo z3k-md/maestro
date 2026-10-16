@@ -4,19 +4,23 @@ export interface Config {
   system: SystemConfig;
 }
 
+export interface KeybindConfig {
+  key: string;
+  action: string;
+}
+
 export interface SessionConfig {
   name: string;
-  encoder: number;
+  keybinds: KeybindConfig[] | null;
 }
 
 export interface MixerConfig {
   enabled: boolean;
-  hotkey: string;
+  hotkey: string | null;
 }
-
 
 export interface SystemConfig {
   autostart: boolean;
   show_console: boolean;
-  theme: string;
+  theme: string | null;
 }

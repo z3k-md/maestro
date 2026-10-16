@@ -24,9 +24,9 @@ export interface CommandArgs {
 
 export interface CommandReturns {
   [Command.GetAllSessions]: AudioSession[];
-  [Command.GetSession]: AudioSession;
-  [Command.SetSessionVolume]: void;
-  [Command.ToggleSessionMute]: void;
+  [Command.GetSession]: AudioSession | null;
+  [Command.SetSessionVolume]: AudioSession | null;
+  [Command.ToggleSessionMute]: boolean | null;
   [Command.GetConfig]: Config;
   [Command.SetConfig]: void;
   [Command.GetTaskbarHeight]: number;

@@ -1,54 +1,48 @@
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tauri::image::Image;
 use tauri::{
+    AppHandle, Listener,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Listener, Manager, Wry,
 };
 
 use crate::api::events::AppEvent;
 use crate::{services::window_service, utils};
 
-static WINDOW_LAST_HIDDEN: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+const TRAY_ICON: &[u8] = include_bytes!("../../icons/speaker-32.png");
 
-pub fn initialize_tray(app_handle: AppHandle<Wry>) {
+static WINDOW_LAST_HIDDEN: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+
+pub fn initialize_tray(app_handle: &AppHandle) -> tauri::Result<()> {
     let version = app_handle.package_info().version.to_string();
 
-    let version_item = MenuItem::with_id(&app_handle, "version", format!("Version: {}", version), false, None::<&str>).unwrap();
-    let open_logs = MenuItem::with_id(&app_handle, "show_logs", "Logs", true, None::<&str>).unwrap();
-    let quit = MenuItem::with_id(&app_handle, "quit", "Quit", true, None::<&str>).unwrap();
-    let settings = MenuItem::with_id(&app_handle, "settings", "Settings", true, None::<&str>).unwrap();
+    let version_item = MenuItem::with_id(app_handle, "version", format!("Version: {}", version), false, None::<&str>)?;
+    let settings = MenuItem::with_id(app_handle, "settings", "Settings", true, None::<&str>)?;
+    let open_logs = MenuItem::with_id(app_handle, "show_logs", "Logs", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app_handle, "quit", "Quit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(&app_handle, &[&version_item, &settings, &open_logs, &quit]).unwrap();
+    let menu = Menu::with_items(app_handle, &[&version_item, &settings, &open_logs, &quit])?;
 
+    // Clicking the tray icon steals focus from the mixer, which hides it. Remember when that happened so the
+    // same click doesn't immediately reopen it.
     app_handle.listen(AppEvent::WindowHidden.as_str(), |_| {
         *WINDOW_LAST_HIDDEN.lock().unwrap() = Some(Instant::now());
     });
 
-    let image = Image::from_path("icons/speaker-32.png").unwrap();
-
-    let _ = TrayIconBuilder::with_id("tray")
-        .tooltip("Maestro 🎻")
-        .icon(image)
+    TrayIconBuilder::with_id("tray")
+        .tooltip("Maestro")
+        .icon(Image::from_bytes(TRAY_ICON)?)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show_logs" => {
                 log::info!("Opening logs");
-                utils::logger::open_log_file();
+                utils::logger::open_log_dir();
             }
             "settings" => {
                 log::info!("Opening settings");
-                let window = window_service::get_window(app.clone(), "settings");
-
-                if window.is_none() {
-                    log::info!("Creating new settings window");
-                    let _ = window_service::create_settings(app.clone());
-                }
-
-                window_service::show_settings(app.clone());
+                window_service::open_settings(app);
             }
             "quit" => {
                 log::info!("Quitting Maestro");
@@ -57,34 +51,29 @@ pub fn initialize_tray(app_handle: AppHandle<Wry>) {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
+            let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Down,
                 ..
             } = event
-            {
-                let app = tray.app_handle();
-                let window = app.get_webview_window("mixer").unwrap();
+            else {
+                return;
+            };
 
-                let grace_period = Duration::from_millis(300);
-                let should_ignore = WINDOW_LAST_HIDDEN
-                    .lock()
-                    .unwrap()
-                    .map_or(false, |last_hidden| last_hidden.elapsed() < grace_period);
+            let grace_period = Duration::from_millis(300);
+            let recently_hidden = WINDOW_LAST_HIDDEN
+                .lock()
+                .unwrap()
+                .is_some_and(|last_hidden| last_hidden.elapsed() < grace_period);
 
-                if should_ignore {
-                    log::debug!("Ignoring tray click due to recent window hide");
-                    return;
-                }
-                if window.is_visible().unwrap() {
-                    log::debug!("Hiding Volume Mixer window");
-                    window_service::hide_mixer(app.clone());
-                } else {
-                    log::debug!("Showing Volume Mixer window");
-                    window_service::hide_overlay(app.clone());
-                    window_service::show_mixer(app.clone());
-                }
+            if recently_hidden {
+                log::debug!("Ignoring tray click due to recent window hide");
+                return;
             }
+
+            window_service::toggle_mixer(tray.app_handle());
         })
-        .build(&app_handle);
+        .build(app_handle)?;
+
+    Ok(())
 }

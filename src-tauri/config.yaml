@@ -13,5 +13,5 @@ mixer:
   hotkey: Ctrl + Shift + M
 system:
   autostart: true
-  show_console: true
+  show_console: false
   theme: dark
